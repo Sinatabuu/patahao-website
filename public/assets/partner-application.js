@@ -31,7 +31,7 @@ form.addEventListener('submit', async event => {
   const message = document.querySelector('#application-message');
   button.disabled = true; button.textContent = 'Submitting…';
   const data = Object.fromEntries(new FormData(form));
-  data.submission_key = submissionKey; data.consent = form.elements.consent.checked; data.office_training = form.elements.office_training.checked;
+  data.submission_key = submissionKey; data.consent = form.elements.consent.checked; data.office_training = form.elements.office_training.checked; data.no_cash_policy = form.elements.no_cash_policy.checked;
   try {
     const result = await send(endpoint+'reserve/', data);
     document.querySelector('#application-reference').textContent = result.reference;

@@ -18,9 +18,9 @@ async function scenario(mode){
   assert.match(d.querySelector('#training-sessions-message').textContent,/open more training dates/);
  }else{
   assert.equal(submit.disabled,false);assert.match(form.elements.training_session.options[1].textContent,/2026-10-21.*1 places/);
-  form.elements.full_name.value='Applicant Test';form.elements.phone_number.value='0712345678';form.elements.training_session.value='7';form.elements.consent.checked=true;form.elements.office_training.checked=true;
+  form.elements.full_name.value='Applicant Test';form.elements.phone_number.value='0712345678';form.elements.training_session.value='7';form.elements.consent.checked=true;form.elements.office_training.checked=true;form.elements.no_cash_policy.checked=true;
   form.dispatchEvent(new w.Event('submit',{bubbles:true,cancelable:true}));await new Promise(r=>setTimeout(r,30));
-  assert.equal(submitted.training_session,'7');assert.equal(submitted.consent,true);
+  assert.equal(submitted.training_session,'7');assert.equal(submitted.consent,true);assert.equal(submitted.no_cash_policy,true);assert.equal(form.elements.no_cash_policy.required,true);assert.match(d.querySelector('.no-cash-notice').textContent,/immediate termination/);
   if(mode==='full'){
    assert.equal(form.hidden,false);assert.equal(form.elements.full_name.value,'Applicant Test');assert.equal(availabilityCalls,2);assert.match(d.querySelector('#application-message').textContent,/filled/);
   }else{
