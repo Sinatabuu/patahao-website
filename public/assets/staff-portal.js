@@ -207,9 +207,9 @@ async function exportReport(report) {
 $('#export-pipeline').addEventListener('click',()=>exportReport('pipeline'));
 $('#export-appointments').addEventListener('click',()=>exportReport('appointments'));
 
-let cohortPage=1, cohortSequence=0, cohortDetailSequence=0, traineeSequence=0, activeCohort=null, activeTrainee=null, manageTraining=false, certifyTraining=false;
+let cohortPage=1, cohortSequence=0, cohortDetailSequence=0, traineeSequence=0, activeCohort=null, activeTrainee=null, manageTraining=false, certifyTraining=false, activateTraining=false, activationSequence=0, activationAccount=null;
 function resetTraining() {
-  cohortSequence++;cohortDetailSequence++;traineeSequence++;cohortPage=1;activeCohort=null;activeTrainee=null;manageTraining=false;certifyTraining=false;
+  cohortSequence++;cohortDetailSequence++;traineeSequence++;activationSequence++;activationAccount=null;activateTraining=false;clearActivation();cohortPage=1;activeCohort=null;activeTrainee=null;manageTraining=false;certifyTraining=false;
   for(const id of ['#cohort-list','#cohort-roster','#training-attendance','#training-assessments','#training-history','#training-readiness']) $(id).replaceChildren();
   for(const id of ['#training-message','#training-save-message','#selected-cohort-name','#selected-cohort-details','#selected-cohort-capacity','#trainee-name','#trainee-reference','#trainee-state','#training-certificate']) $(id).textContent='';
   $('#cohort-create').reset();$('#schedule-training-form').reset();$('#schedule-date').replaceChildren();$('#assigned-training').textContent='';$('#schedule-message').textContent='';$('#training-record-form').reset();$('#cohort-detail').hidden=true;$('#cohort-empty').hidden=false;$('#trainee-panel').hidden=true;
@@ -221,7 +221,7 @@ async function loadCohorts() {
   const sequence=++cohortSequence;message('#training-message','Loading cohorts…');
   try {
     const data=await request('training/cohorts/?page='+cohortPage);if(sequence!==cohortSequence||!token)return;
-    manageTraining=data.can_manage;certifyTraining=data.can_certify;loadSchedulingDates();$('#cohort-create').hidden=!manageTraining;
+    manageTraining=data.can_manage;certifyTraining=data.can_certify;activateTraining=!!data.can_activate;loadSchedulingDates();$('#cohort-create').hidden=!manageTraining;
     $('#cohort-previous').disabled=!data.previous;$('#cohort-next').disabled=!data.next;$('#cohort-page').textContent='Page '+cohortPage;
     const list=$('#cohort-list');list.replaceChildren();if(!data.results.length)list.textContent='No training cohorts yet.';
     data.results.forEach(c=>{const row=document.createElement('button');row.type='button';row.className='app-row';const name=document.createElement('strong');name.textContent=c.name;const meta=document.createElement('small');meta.textContent=(c.time_label?c.time_label+' · ':'')+c.enrolled+'/12 places'+(c.enrolled>=12?' · Full':'')+' · '+c.certified+' certified';row.append(name,meta);row.addEventListener('click',()=>openCohort(c.id));list.append(row);});message('#training-message','');
@@ -246,15 +246,15 @@ function resultSelect(value,options,dataKey,dataValue) {
   const select=document.createElement('select');select.dataset[dataKey]=dataValue;options.forEach(([v,label])=>select.add(new Option(label,v)));select.value=value;return select;
 }
 function displayTrainee(e) {
-  activeTrainee=e;$('#trainee-panel').hidden=false;$('#trainee-name').textContent=e.full_name;$('#trainee-reference').textContent=e.application_reference;$('#trainee-state').textContent=e.state_label;
+  clearActivation();activeTrainee=e;if(activateTraining)loadActivation(e.id);$('#trainee-panel').hidden=false;$('#trainee-name').textContent=e.full_name;$('#trainee-reference').textContent=e.application_reference;$('#trainee-state').textContent=e.state_label;
   $('#identity-checked').checked=e.identity_checked;$('#agreement-signed').checked=e.agreement_signed;
   const attendance=$('#training-attendance');attendance.replaceChildren();e.attendance.forEach(a=>{const label=document.createElement('label');label.append(document.createTextNode(a.date+' (Kenya)'));label.append(resultSelect(a.result,[['pending','Not recorded'],['present','Present'],['absent','Absent'],['makeup','Make-up completed']],'session',a.session_id));attendance.append(label);});
   const assessments=$('#training-assessments');assessments.replaceChildren();e.assessments.forEach(a=>{const label=document.createElement('label');label.append(document.createTextNode(a.label));label.append(resultSelect(a.result,[['pending','Not assessed'],['pass','Competent'],['retrain','Further training required']],'module',a.module));assessments.append(label);});
   const editable=manageTraining&&e.state==='enrolled';$('#training-record-form').querySelectorAll('input,select,button').forEach(control=>control.disabled=!editable);
   const issues=$('#training-readiness');issues.replaceChildren();(e.readiness_issues.length?e.readiness_issues:['Recorded requirements are complete. Supervisor approval is still required.']).forEach(text=>{const li=document.createElement('li');li.textContent=text;issues.append(li);});
-  $('#training-certificate').textContent=e.certified_at?'Certified by '+e.certified_by+' · '+kenyanDate(e.certified_at)+' · Activation pending.':'';
+  $('#training-certificate').textContent=e.certified_at?'Certified by '+e.certified_by+' · '+kenyanDate(e.certified_at)+(e.activation?' · Partner activated.':' · Activation pending.'):'';
   $('#certify-training').hidden=!certifyTraining||e.state!=='enrolled';$('#certify-training').disabled=e.readiness_issues.length>0;
-  $('#reopen-training').hidden=!certifyTraining||e.state==='enrolled';$('#withdraw-training').hidden=!certifyTraining||e.state==='withdrawn';
+  $('#reopen-training').hidden=!!e.activation||!certifyTraining||e.state==='enrolled';$('#withdraw-training').hidden=!!e.activation||!certifyTraining||e.state==='withdrawn';
   const history=$('#training-history');history.replaceChildren();e.history.forEach(x=>{const li=document.createElement('li');li.textContent=x.action+' · '+x.actor+' · '+kenyanDate(x.created_at);history.append(li);});
 }
 async function openTrainee(id) {
@@ -304,4 +304,28 @@ $('#schedule-training-form').addEventListener('submit',async event=>{
     if(selected?.id===applicantId)message('#schedule-message',(result.overflow?'Selected date full; assigned next available class. ':'')+'Scheduled: '+result.class.scheduled_date+' · '+result.class.time_label+' (Kenya) · '+result.class.location+'. Contact the applicant to confirm; no message was sent.');
   } catch(error){if(token&&selected?.id===applicantId)message('#schedule-message',error.message,true);}
   finally{if(token)$('#schedule-training').disabled=!staff?.can_change;}
+});
+
+function clearActivation() {
+  activationSequence++;activationAccount=null;$('#activation-panel').hidden=true;$('#activation-form').hidden=true;$('#activation-form').reset();$('#activation-account').textContent='';$('#activation-issues').replaceChildren();$('#activation-message').textContent='';
+}
+async function loadActivation(id) {
+  const sequence=++activationSequence;
+  try {
+    const data=await request('training/enrollments/'+id+'/activation/');if(!token||sequence!==activationSequence||activeTrainee?.id!==id)return;
+    $('#activation-panel').hidden=false;$('#activation-issues').replaceChildren();
+    data.issues.forEach(text=>{const li=document.createElement('li');li.textContent=text;$('#activation-issues').append(li);});
+    activationAccount=data.account;$('#activation-form').hidden=!!data.activation||!!data.issues.length||!data.account;
+    $('#activation-account').textContent=data.activation?'Partner activated: '+data.activation.partner_code+' · App username: '+data.activation.username+(data.activation.is_active?'':' · Profile currently inactive; use partner management.'):(data.account?'App account: '+data.account.username+' · '+(data.account.full_name||'Name not set')+' · '+data.account.phone_number:'No eligible app account selected.');
+  } catch(error){if(token&&sequence===activationSequence){$('#activation-panel').hidden=false;message('#activation-message',error.message,true);}}
+}
+$('#reload-activation').addEventListener('click',()=>{if(activeTrainee)openTrainee(activeTrainee.id);});
+$('#activation-form').addEventListener('submit',async event=>{
+  event.preventDefault();if(!activeTrainee||!activationAccount||!activateTraining)return;
+  const id=activeTrainee.id,button=$('#activate-partner');button.disabled=true;
+  try {
+    const result=await request('training/enrollments/'+id+'/activation/',{method:'POST',body:JSON.stringify({user_id:activationAccount.id,expected_updated_at:activeTrainee.updated_at,account_confirmed:$('#activation-account-confirmed').checked,no_cash_confirmed:$('#activation-no-cash').checked})});
+    if(!token||activeTrainee?.id!==id)return;await openTrainee(id);await loadCohorts();if(activeCohort)await openCohort(activeCohort.id);message('#activation-message',result.detail);
+  }catch(error){if(token&&activeTrainee?.id===id)message('#activation-message',error.message,true);}
+  finally{if(token)button.disabled=false;}
 });
