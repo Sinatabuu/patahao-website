@@ -50,7 +50,7 @@ statusForm.addEventListener('submit', async event => {
   try {
     const result = await send(endpoint + 'status/', data);
     const appointment = result.office_appointment ? '\nOffice appointment: ' + new Date(result.office_appointment).toLocaleString('en-KE', {timeZone:'Africa/Nairobi'}) + ' (Kenya time)' : '';
-    const training = result.training ? '\nTraining cohort: ' + result.training.cohort + '\nTraining dates (Kenya): ' + result.training.dates.join(', ') + '\nAttendance completed: ' + result.training.attendance_completed + '/' + result.training.sessions_required + '\nPractical modules competent: ' + result.training.competent_modules + '/' + result.training.modules_required : '';
+    const training = result.training ? '\nTraining cohort: ' + result.training.cohort + '\nTime (Kenya): ' + (result.training.time || 'Confirm with our team') + '\nLocation: ' + result.training.location + '\nTraining dates (Kenya): ' + result.training.dates.join(', ') + '\nAttendance completed: ' + result.training.attendance_completed + '/' + result.training.sessions_required + '\nPractical modules competent: ' + result.training.competent_modules + '/' + result.training.modules_required : '';
     showMessage(message, result.status + appointment + training + '\n' + result.message);
   } catch (error) { showMessage(message, error.message, true); }
   finally { button.disabled = false; }

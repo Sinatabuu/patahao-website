@@ -13,7 +13,8 @@ w.fetch=async(url,options)=>{
  if(url.endsWith('login/'))result={access:'test-token',expires_in:1200,staff:{name:'Supervisor',can_change:true}};
  else {
   assert.equal(options.headers.Authorization,'Bearer test-token');
-  if(url.includes('applications/?'))result={count:0,next:null,previous:null,counts:{},statuses:[],results:[]};
+  if(url.endsWith('training/dates/'))result={dates:[],defaults:{trainer_name:'',location:''}};
+  else if(url.includes('applications/?'))result={count:0,next:null,previous:null,counts:{},statuses:[],results:[]};
   else if(url.includes('cohorts/?'))result={results:[cohort],next:null,previous:null,can_manage:true,can_certify:true};
   else if(url.endsWith('cohorts/1/'))result={...cohort,enrollments:[{id:1,full_name:record.full_name,state_label:record.state_label}]};
   else if(url.endsWith('decision/')){

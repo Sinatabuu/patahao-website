@@ -12,6 +12,7 @@ let applicant={id:1,full_name:'<img src=x onerror=alert(1)>',reference:'PH-APP-T
 w.fetch=async(url,options)=>{
  let result;
  if(url.endsWith('login/')) result={access:'test-only-token',expires_in:1200,staff:{name:'Reviewer',can_change:true}};
+ else if(url.endsWith('training/dates/')) result={dates:[],defaults:{trainer_name:'',location:''}};
  else if(url.includes('reports/?')) result={generated_at:'2026-10-19T12:00:00Z',pipeline:{total:3,statuses:[{status:'submitted',label:'Application received',count:2},{status:'invited',label:'Invited to office',count:1}],counties:[{county:'Nairobi',count:3}]},appointments:{upcoming_count:1,past_count:0,count:1,next:null,previous:null,results:[applicant]},can_export:true};
  else {
   assert.equal(options.headers.Authorization,'Bearer test-only-token');
