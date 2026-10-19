@@ -20,3 +20,13 @@ node --check public/assets/staff-portal.js
 ```
 
 These tests do not replace browser layout checks or live end-to-end verification.
+
+## Reports
+
+The Reports section adds recruitment status counts, county summaries and office
+schedules. Dates use Kenya calendar days. Pipeline dates are application dates;
+schedule dates are appointment dates. Past appointments do not establish attendance.
+CSV downloads require screening-edit permission, exclude phone/email, and include
+the applied filters. Appointment rows open the existing applicant detail screen.
+Deploy the matching reports API before this frontend; no database migration is
+needed for this reporting increment.

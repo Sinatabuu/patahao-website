@@ -12,6 +12,7 @@ let applicant={id:1,full_name:'<img src=x onerror=alert(1)>',reference:'PH-APP-T
 w.fetch=async(url,options)=>{
  let result;
  if(url.endsWith('login/')) result={access:'test-only-token',expires_in:1200,staff:{name:'Reviewer',can_change:true}};
+ else if(url.includes('reports/?')) result={generated_at:'2026-10-19T12:00:00Z',pipeline:{total:3,statuses:[{status:'submitted',label:'Application received',count:2},{status:'invited',label:'Invited to office',count:1}],counties:[{county:'Nairobi',count:3}]},appointments:{upcoming_count:1,past_count:0,count:1,next:null,previous:null,results:[applicant]},can_export:true};
  else {
   assert.equal(options.headers.Authorization,'Bearer test-only-token');
   if(options.method==='PATCH') {lastPatch=JSON.parse(options.body);applicant={...applicant,...lastPatch,status_label:'Invited to office',updated_at:'2026-10-19T12:00:00Z'};result=applicant;}
@@ -34,11 +35,23 @@ const submit=id=>d.querySelector(id).dispatchEvent(new w.Event('submit',{bubbles
  assert.equal(lastPatch.office_appointment,'2026-10-21T09:00:00+03:00');
  assert.equal(lastPatch.expected_updated_at,'2026-10-19T10:00:00Z');
  assert.match(d.querySelector('#save-message').textContent,/Saved/);
+ d.querySelector('#reports-tab').click();await settle();
+ assert.equal(d.querySelector('#reports-view').hidden,false);
+ assert.equal(d.querySelector('#applications-view').hidden,true);
+ assert.match(d.querySelector('#pipeline-total').textContent,/3 applications/);
+ assert.equal(d.querySelectorAll('#pipeline-breakdown .pipeline-row').length,2);
+ assert.equal(d.querySelectorAll('#report-appointments button').length,1);
+ assert.equal(d.querySelector('#report-appointments img'),null);
+ assert.equal(d.querySelector('#export-pipeline').disabled,false);
+ d.querySelector('#report-appointments button').click();await settle();
+ assert.equal(d.querySelector('#applications-view').hidden,false);
+ assert.equal(d.querySelector('#applicant-name').textContent,applicant.full_name);
  d.querySelector('#application-search').value='254712345678';d.querySelector('#sign-out').click();
  assert.equal(d.querySelector('#workspace').hidden,true);
  assert.equal(d.querySelector('#applicant-facts').children.length,0);
  assert.equal(d.querySelector('#application-search').value,'');
+ assert.equal(d.querySelector('#report-appointments').children.length,0);
  assert.equal(w.localStorage.length,0);assert.equal(w.sessionStorage.length,0);
- console.log('PASS: portal login, applicant rendering, XSS text handling, Kenya appointment save, logout data clearing, and no persistent token storage.');
+ console.log('PASS: portal login, applicant safety, Kenya appointment save, reports rendering, appointment drill-down, logout clearing, and no persistent tokens.');
  w.close();
 })().catch(e=>{console.error(e);w.close();process.exitCode=1});

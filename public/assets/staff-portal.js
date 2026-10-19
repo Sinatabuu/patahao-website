@@ -12,15 +12,21 @@ function signOut(reason='Signed out.') {
   $('#applicant-facts').replaceChildren(); $('#applicant-name').textContent=''; $('#applicant-reference').textContent='';
   $('#detail-content').hidden=true; $('#empty-detail').hidden=false; $('#screening-form').reset();
   $('#staff-name').textContent=''; $('#application-search').value=''; $('#status-filter').value='';
+  resetReports();
   $('#staff-login').reset(); message('#login-message',reason); $('#staff-login').elements.username.focus();
 }
 function renewIdle() { if(token) { clearTimeout(idleTimer); idleTimer=setTimeout(()=>signOut('Signed out after 15 minutes of inactivity. Please sign in again.'),15*60*1000); } }
 for(const event of ['click','keydown','touchstart']) document.addEventListener(event,renewIdle,{passive:true});
 async function request(path, options={}) {
+  const {responseType='json',...fetchOptions}=options;
   const controller=new AbortController(); const timeout=setTimeout(()=>controller.abort(),30000);
   const activeToken=token;
   try {
-    const response=await fetch(api+path,{...options,credentials:'omit',cache:'no-store',headers:{'Content-Type':'application/json',...(activeToken?{Authorization:'Bearer '+activeToken}:{}),...options.headers},signal:controller.signal});
+    const response=await fetch(api+path,{...fetchOptions,credentials:'omit',cache:'no-store',headers:{'Content-Type':'application/json',...(activeToken?{Authorization:'Bearer '+activeToken}:{}),...fetchOptions.headers},signal:controller.signal});
+    if(response.ok && responseType==='blob') {
+      if(activeToken && token!==activeToken) throw new Error('Session changed. Please sign in again.');
+      return await response.blob();
+    }
     let data; try { data=await response.json(); } catch (_) { throw new Error('The server returned an unreadable response. Please try again.'); }
     if(!response.ok) {
       if([401,403].includes(response.status) && activeToken && token===activeToken) signOut('Your session ended or access changed. Please sign in again.');
@@ -127,3 +133,73 @@ $('#screening-form').addEventListener('submit',async event=>{
   } catch(error){if(selected?.id===id)message('#save-message',error.message,true);}
   finally{if(token)button.disabled=!staff?.can_change;}
 });
+
+let reportPage=1, reportSequence=0, reportFilters=new URLSearchParams(), exportsAllowed=false;
+function selectWorkspace(section) {
+  $('#applications-view').hidden=section!=='applications'; $('#reports-view').hidden=section!=='reports';
+  $('#applications-tab').setAttribute('aria-pressed',String(section==='applications'));
+  $('#reports-tab').setAttribute('aria-pressed',String(section==='reports'));
+}
+function resetReports() {
+  reportSequence++; reportPage=1; reportFilters=new URLSearchParams(); exportsAllowed=false;
+  $('#report-filters').reset();
+  for(const id of ['#pipeline-breakdown','#county-breakdown','#report-appointments']) $(id).replaceChildren();
+  for(const id of ['#pipeline-total','#appointment-totals','#reports-message','#report-generated','#report-page']) $(id).textContent='';
+  $('#export-pipeline').disabled=true; $('#export-appointments').disabled=true;
+  selectWorkspace('applications');
+}
+$('#applications-tab').addEventListener('click',()=>selectWorkspace('applications'));
+$('#reports-tab').addEventListener('click',()=>{selectWorkspace('reports');reportPage=1;loadReports();});
+function readReportFilters() {
+  return new URLSearchParams({date_from:$('#report-from').value,date_to:$('#report-to').value,county:$('#report-county').value.trim(),appointment_scope:$('#report-scope').value});
+}
+$('#report-filters').addEventListener('submit',event=>{event.preventDefault();reportPage=1;reportFilters=readReportFilters();loadReports();});
+$('#clear-report-filters').addEventListener('click',()=>{$('#report-filters').reset();reportPage=1;reportFilters=readReportFilters();loadReports();});
+$('#report-previous').addEventListener('click',()=>{if(reportPage>1){reportPage--;loadReports();}});
+$('#report-next').addEventListener('click',()=>{reportPage++;loadReports();});
+async function loadReports() {
+  const sequence=++reportSequence; message('#reports-message','Loading reports…');
+  $('#report-results').hidden=true; $('#report-generated').textContent='';
+  $('#export-pipeline').disabled=true; $('#export-appointments').disabled=true;
+  const query=new URLSearchParams(reportFilters);query.set('page',String(reportPage));
+  try {
+    const data=await request('reports/?'+query);
+    if(sequence!==reportSequence||!token)return;
+    $('#report-generated').textContent='Generated '+kenyanDate(data.generated_at);
+    $('#pipeline-total').textContent=data.pipeline.total+' applications in the selected application period.';
+    const breakdown=$('#pipeline-breakdown');breakdown.replaceChildren();
+    data.pipeline.statuses.forEach(item=>{
+      const row=document.createElement('div');row.className='pipeline-row';
+      const label=document.createElement('div');label.className='pipeline-label';
+      const name=document.createElement('span');name.textContent=item.label;const value=document.createElement('strong');value.textContent=item.count;label.append(name,value);
+      const bar=document.createElement('div');bar.className='pipeline-bar';bar.setAttribute('aria-hidden','true');const fill=document.createElement('span');fill.style.width=(data.pipeline.total?100*item.count/data.pipeline.total:0)+'%';bar.append(fill);row.append(label,bar);breakdown.append(row);
+    });
+    const counties=$('#county-breakdown');counties.replaceChildren();
+    if(!data.pipeline.counties.length)counties.textContent='No applications match these filters.';
+    data.pipeline.counties.forEach(item=>{const row=document.createElement('div');row.className='county-row';const name=document.createElement('span');name.textContent=item.county||'Not recorded';const count=document.createElement('strong');count.textContent=item.count;row.append(name,count);counties.append(row);});
+    const appointments=data.appointments;
+    $('#appointment-totals').textContent=appointments.upcoming_count+' upcoming · '+appointments.past_count+' past appointments in the selected appointment period.';
+    $('#report-page').textContent='Page '+reportPage+' · '+appointments.count+' appointments';
+    $('#report-previous').disabled=!appointments.previous;$('#report-next').disabled=!appointments.next;
+    const list=$('#report-appointments');list.replaceChildren();
+    if(!appointments.results.length)list.textContent='No appointments match this view.';
+    appointments.results.forEach(a=>{const row=document.createElement('button');row.className='app-row';row.type='button';const name=document.createElement('strong');name.textContent=a.full_name;const time=document.createElement('div');time.textContent=kenyanDate(a.office_appointment);const detail=document.createElement('small');detail.textContent=a.operating_area+', '+a.county+' · '+a.status_label;row.append(name,time,detail);row.addEventListener('click',()=>{selectWorkspace('applications');openDetail(a.id);});list.append(row);});
+    $('#report-results').hidden=false;
+    exportsAllowed=data.can_export;$('#export-pipeline').disabled=!exportsAllowed;$('#export-appointments').disabled=!exportsAllowed;
+    message('#reports-message','');
+  } catch(error){if(sequence===reportSequence&&token)message('#reports-message',error.message,true);}
+}
+async function exportReport(report) {
+  if(!exportsAllowed||!token)return;
+  const button=$(report==='pipeline'?'#export-pipeline':'#export-appointments');button.disabled=true;
+  const query=new URLSearchParams(reportFilters);query.set('report',report);
+  try {
+    const blob=await request('reports/export/?'+query,{responseType:'blob'});
+    if(!token)return;
+    const url=URL.createObjectURL(blob);const link=document.createElement('a');link.href=url;link.download='patahao-'+report+'.csv';document.body.append(link);link.click();link.remove();setTimeout(()=>URL.revokeObjectURL(url),1000);
+    message('#reports-message','CSV downloaded. Keep staff reports secure and share only with authorized colleagues.');
+  } catch(error){if(token)message('#reports-message',error.message,true);}
+  finally{if(token)button.disabled=!exportsAllowed;}
+}
+$('#export-pipeline').addEventListener('click',()=>exportReport('pipeline'));
+$('#export-appointments').addEventListener('click',()=>exportReport('appointments'));
