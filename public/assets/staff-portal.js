@@ -12,7 +12,7 @@ function signOut(reason='Signed out.') {
   $('#applicant-facts').replaceChildren(); $('#applicant-name').textContent=''; $('#applicant-reference').textContent='';
   $('#detail-content').hidden=true; $('#empty-detail').hidden=false; $('#screening-form').reset();
   $('#staff-name').textContent=''; $('#application-search').value=''; $('#status-filter').value='';
-  resetReports();
+  resetReports(); resetTraining();
   $('#staff-login').reset(); message('#login-message',reason); $('#staff-login').elements.username.focus();
 }
 function renewIdle() { if(token) { clearTimeout(idleTimer); idleTimer=setTimeout(()=>signOut('Signed out after 15 minutes of inactivity. Please sign in again.'),15*60*1000); } }
@@ -136,9 +136,9 @@ $('#screening-form').addEventListener('submit',async event=>{
 
 let reportPage=1, reportSequence=0, reportFilters=new URLSearchParams(), exportsAllowed=false;
 function selectWorkspace(section) {
-  $('#applications-view').hidden=section!=='applications'; $('#reports-view').hidden=section!=='reports';
+  $('#applications-view').hidden=section!=='applications'; $('#reports-view').hidden=section!=='reports'; $('#training-view').hidden=section!=='training';
   $('#applications-tab').setAttribute('aria-pressed',String(section==='applications'));
-  $('#reports-tab').setAttribute('aria-pressed',String(section==='reports'));
+  $('#reports-tab').setAttribute('aria-pressed',String(section==='reports')); $('#training-tab').setAttribute('aria-pressed',String(section==='training'));
 }
 function resetReports() {
   reportSequence++; reportPage=1; reportFilters=new URLSearchParams(); exportsAllowed=false;
@@ -203,3 +203,81 @@ async function exportReport(report) {
 }
 $('#export-pipeline').addEventListener('click',()=>exportReport('pipeline'));
 $('#export-appointments').addEventListener('click',()=>exportReport('appointments'));
+
+let cohortPage=1, cohortSequence=0, cohortDetailSequence=0, traineeSequence=0, activeCohort=null, activeTrainee=null, manageTraining=false, certifyTraining=false;
+function resetTraining() {
+  cohortSequence++;cohortDetailSequence++;traineeSequence++;cohortPage=1;activeCohort=null;activeTrainee=null;manageTraining=false;certifyTraining=false;
+  for(const id of ['#cohort-list','#cohort-roster','#training-attendance','#training-assessments','#training-history','#training-readiness']) $(id).replaceChildren();
+  for(const id of ['#training-message','#training-save-message','#selected-cohort-name','#selected-cohort-details','#selected-cohort-capacity','#trainee-name','#trainee-reference','#trainee-state','#training-certificate']) $(id).textContent='';
+  $('#cohort-create').reset();$('#enroll-form').reset();$('#training-record-form').reset();$('#cohort-detail').hidden=true;$('#cohort-empty').hidden=false;$('#trainee-panel').hidden=true;
+}
+$('#training-tab').addEventListener('click',()=>{selectWorkspace('training');cohortPage=1;loadCohorts();});
+$('#cohort-previous').addEventListener('click',()=>{if(cohortPage>1){cohortPage--;loadCohorts();}});
+$('#cohort-next').addEventListener('click',()=>{cohortPage++;loadCohorts();});
+async function loadCohorts() {
+  const sequence=++cohortSequence;message('#training-message','Loading cohorts…');
+  try {
+    const data=await request('training/cohorts/?page='+cohortPage);if(sequence!==cohortSequence||!token)return;
+    manageTraining=data.can_manage;certifyTraining=data.can_certify;$('#cohort-create').hidden=!manageTraining;
+    $('#cohort-previous').disabled=!data.previous;$('#cohort-next').disabled=!data.next;$('#cohort-page').textContent='Page '+cohortPage;
+    const list=$('#cohort-list');list.replaceChildren();if(!data.results.length)list.textContent='No training cohorts yet.';
+    data.results.forEach(c=>{const row=document.createElement('button');row.type='button';row.className='app-row';const name=document.createElement('strong');name.textContent=c.name;const meta=document.createElement('small');meta.textContent=c.enrolled+'/12 active trainees · '+c.certified+' certified';row.append(name,meta);row.addEventListener('click',()=>openCohort(c.id));list.append(row);});message('#training-message','');
+  } catch(error){if(sequence===cohortSequence&&token)message('#training-message',error.message,true);}
+}
+$('#cohort-create').addEventListener('submit',async event=>{
+  event.preventDefault();const button=event.currentTarget.querySelector('button');button.disabled=true;
+  const dates=$('#cohort-dates').value.split(/\r?\n/).map(x=>x.trim()).filter(Boolean);
+  try {const result=await request('training/cohorts/',{method:'POST',body:JSON.stringify({name:$('#cohort-name').value,trainer_name:$('#cohort-trainer').value,location:$('#cohort-location').value,dates})});$('#cohort-create').reset();cohortPage=1;await loadCohorts();await openCohort(result.id);}
+  catch(error){if(token)message('#training-message',error.message,true);}finally{button.disabled=false;}
+});
+async function openCohort(id) {
+  const sequence=++cohortDetailSequence;
+  message('#training-message','Loading cohort…');
+  try {const c=await request('training/cohorts/'+id+'/');if(!token||sequence!==cohortDetailSequence)return;activeCohort=c;$('#cohort-empty').hidden=true;$('#cohort-detail').hidden=false;$('#selected-cohort-name').textContent=c.name;$('#selected-cohort-details').textContent=c.reference+' · Trainer: '+c.trainer_name+' · '+c.location+' · Dates: '+c.sessions.map(s=>s.date).join(', ');$('#selected-cohort-capacity').textContent=c.enrolled+' of 12 active places occupied';$('#enroll-form').hidden=!manageTraining;
+    const roster=$('#cohort-roster');roster.replaceChildren();if(!c.enrollments.length)roster.textContent='No trainees enrolled.';
+    c.enrollments.forEach(e=>{const row=document.createElement('button');row.type='button';row.className='app-row';const name=document.createElement('strong');name.textContent=e.full_name;const state=document.createElement('small');state.textContent=e.state_label;row.append(name,state);row.addEventListener('click',()=>openTrainee(e.id));roster.append(row);});message('#training-message','');
+  }catch(error){if(token)message('#training-message',error.message,true);}
+}
+$('#enroll-form').addEventListener('submit',async event=>{
+  event.preventDefault();if(!activeCohort)return;const cohortId=activeCohort.id;const button=event.currentTarget.querySelector('button');button.disabled=true;
+  try{const e=await request('training/cohorts/'+cohortId+'/',{method:'POST',body:JSON.stringify({application_reference:$('#enroll-reference').value.trim().toUpperCase()})});$('#enroll-form').reset();if(activeCohort?.id===cohortId){await openCohort(cohortId);displayTrainee(e);}await loadCohorts();}
+  catch(error){if(token)message('#training-message',error.message,true);}finally{button.disabled=false;}
+});
+function resultSelect(value,options,dataKey,dataValue) {
+  const select=document.createElement('select');select.dataset[dataKey]=dataValue;options.forEach(([v,label])=>select.add(new Option(label,v)));select.value=value;return select;
+}
+function displayTrainee(e) {
+  activeTrainee=e;$('#trainee-panel').hidden=false;$('#trainee-name').textContent=e.full_name;$('#trainee-reference').textContent=e.application_reference;$('#trainee-state').textContent=e.state_label;
+  $('#identity-checked').checked=e.identity_checked;$('#agreement-signed').checked=e.agreement_signed;
+  const attendance=$('#training-attendance');attendance.replaceChildren();e.attendance.forEach(a=>{const label=document.createElement('label');label.append(document.createTextNode(a.date+' (Kenya)'));label.append(resultSelect(a.result,[['pending','Not recorded'],['present','Present'],['absent','Absent'],['makeup','Make-up completed']],'session',a.session_id));attendance.append(label);});
+  const assessments=$('#training-assessments');assessments.replaceChildren();e.assessments.forEach(a=>{const label=document.createElement('label');label.append(document.createTextNode(a.label));label.append(resultSelect(a.result,[['pending','Not assessed'],['pass','Competent'],['retrain','Further training required']],'module',a.module));assessments.append(label);});
+  const editable=manageTraining&&e.state==='enrolled';$('#training-record-form').querySelectorAll('input,select,button').forEach(control=>control.disabled=!editable);
+  const issues=$('#training-readiness');issues.replaceChildren();(e.readiness_issues.length?e.readiness_issues:['Recorded requirements are complete. Supervisor approval is still required.']).forEach(text=>{const li=document.createElement('li');li.textContent=text;issues.append(li);});
+  $('#training-certificate').textContent=e.certified_at?'Certified by '+e.certified_by+' · '+kenyanDate(e.certified_at)+' · Activation pending.':'';
+  $('#certify-training').hidden=!certifyTraining||e.state!=='enrolled';$('#certify-training').disabled=e.readiness_issues.length>0;
+  $('#reopen-training').hidden=!certifyTraining||e.state==='enrolled';$('#withdraw-training').hidden=!certifyTraining||e.state==='withdrawn';
+  const history=$('#training-history');history.replaceChildren();e.history.forEach(x=>{const li=document.createElement('li');li.textContent=x.action+' · '+x.actor+' · '+kenyanDate(x.created_at);history.append(li);});
+}
+async function openTrainee(id) {
+  const sequence=++traineeSequence;message('#training-save-message','');
+  try{const e=await request('training/enrollments/'+id+'/');if(sequence!==traineeSequence||!token)return;displayTrainee(e);$('#trainee-panel').scrollIntoView({block:'start'});}
+  catch(error){if(sequence===traineeSequence&&token)message('#training-message',error.message,true);}
+}
+$('#reload-training').addEventListener('click',()=>{if(activeTrainee)openTrainee(activeTrainee.id);});
+$('#training-record-form').addEventListener('submit',async event=>{
+  event.preventDefault();if(!activeTrainee)return;const enrollmentId=activeTrainee.id;const button=$('#save-training');button.disabled=true;
+  const payload={expected_updated_at:activeTrainee.updated_at,identity_checked:$('#identity-checked').checked,agreement_signed:$('#agreement-signed').checked,attendance:[...$('#training-attendance').querySelectorAll('select')].map(s=>({session_id:Number(s.dataset.session),result:s.value})),assessments:[...$('#training-assessments').querySelectorAll('select')].map(s=>({module:s.dataset.module,result:s.value}))};
+  try{const e=await request('training/enrollments/'+enrollmentId+'/',{method:'PATCH',body:JSON.stringify(payload)});if(!token||activeTrainee?.id!==enrollmentId)return;displayTrainee(e);message('#training-save-message','Training record saved. Certification has not been granted by this save.');}
+  catch(error){if(token)message('#training-save-message',error.message,true);}finally{if(token)button.disabled=!manageTraining||activeTrainee?.state!=='enrolled';}
+});
+async function decideTraining(decision) {
+  if(!activeTrainee||!certifyTraining)return;
+  const enrollmentId=activeTrainee.id;
+  $('#certify-training').disabled=true;$('#reopen-training').disabled=true;$('#withdraw-training').disabled=true;
+  try{const e=await request('training/enrollments/'+enrollmentId+'/decision/',{method:'POST',body:JSON.stringify({decision,expected_updated_at:activeTrainee.updated_at})});if(!token)return;if(activeTrainee?.id===enrollmentId)displayTrainee(e);await loadCohorts();if(activeCohort)await openCohort(activeCohort.id);message('#training-save-message','Supervisor decision saved. No account or field access was activated.');}
+  catch(error){if(token)message('#training-save-message',error.message,true);}
+  finally{if(token){$('#reopen-training').disabled=false;$('#withdraw-training').disabled=false;$('#certify-training').disabled=activeTrainee?.readiness_issues.length>0;}}
+}
+$('#certify-training').addEventListener('click',()=>decideTraining('certify'));
+$('#reopen-training').addEventListener('click',()=>decideTraining('reopen'));
+$('#withdraw-training').addEventListener('click',()=>decideTraining('withdraw'));
