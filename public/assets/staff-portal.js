@@ -36,7 +36,7 @@ async function request(path, options={}) {
     if(activeToken && token!==activeToken) throw new Error('Session changed. Please sign in again.');
     return data;
   } catch(error) {
-    if(error.name==='AbortError'||error instanceof TypeError) throw new Error('Connection interrupted. Refresh the applicant before repeating a save; the server may have already recorded it.');
+    if(error.name==='AbortError'||error instanceof TypeError) throw new Error(path==='login/'?'Could not connect to staff sign-in. Wait a moment and try again.':'Connection interrupted. Refresh the applicant before repeating a save; the server may have already recorded it.');
     throw error;
   } finally { clearTimeout(timeout); }
 }

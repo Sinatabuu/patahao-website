@@ -7,10 +7,11 @@ const dom=new JSDOM(html,{url:'https://patahao.app/staff/',runScripts:'outside-o
 const w=dom.window,d=w.document;
 w.matchMedia=()=>({matches:false});
 w.HTMLElement.prototype.scrollIntoView=()=>{};
-let lastPatch;
+let lastPatch, failFirstLogin=true;
 let applicant={id:1,full_name:'<img src=x onerror=alert(1)>',reference:'PH-APP-TEST',phone_number:'254712345678',email:'test@example.test',county:'Nairobi',operating_area:'Roysambu',partner_type_label:'Agent',experience_label:'New',availability_label:'Weekdays',status:'submitted',status_label:'Application received',office_appointment:'2026-10-21T06:00:00Z',created_at:'2026-10-19T10:00:00Z',updated_at:'2026-10-19T10:00:00Z',history:[]};
 w.fetch=async(url,options)=>{
  let result;
+ if(url.endsWith('login/')&&failFirstLogin){failFirstLogin=false;throw new w.TypeError('Failed to fetch');}
  if(url.endsWith('login/')) result={access:'test-only-token',expires_in:1200,staff:{name:'Reviewer',can_change:true}};
  else if(url.endsWith('training/dates/')) result={dates:[],defaults:{trainer_name:'',location:''}};
  else if(url.includes('reports/?')) result={generated_at:'2026-10-19T12:00:00Z',pipeline:{total:3,statuses:[{status:'submitted',label:'Application received',count:2},{status:'invited',label:'Invited to office',count:1}],counties:[{county:'Nairobi',count:3}]},appointments:{upcoming_count:1,past_count:0,count:1,next:null,previous:null,results:[applicant]},can_export:true};
@@ -27,6 +28,9 @@ const submit=id=>d.querySelector(id).dispatchEvent(new w.Event('submit',{bubbles
 (async()=>{
  w.eval(js);
  d.querySelector('#staff-login').elements.username.value='reviewer';d.querySelector('#staff-login').elements.password.value='test';submit('#staff-login');await settle();
+ assert.match(d.querySelector('#login-message').textContent,/Could not connect to staff sign-in/);
+ assert.doesNotMatch(d.querySelector('#login-message').textContent,/applicant|save/);
+ submit('#staff-login');await settle();
  assert.equal(d.querySelector('#workspace').hidden,false);
  assert.equal(d.querySelectorAll('.app-row').length,1);
  assert.equal(d.querySelector('.app-row img'),null,'Applicant names must not become HTML');
