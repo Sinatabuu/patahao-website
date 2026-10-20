@@ -18,8 +18,8 @@ function signOut(reason='Signed out.') {
 function renewIdle() { if(token) { clearTimeout(idleTimer); idleTimer=setTimeout(()=>signOut('Signed out after 15 minutes of inactivity. Please sign in again.'),15*60*1000); } }
 for(const event of ['click','keydown','touchstart']) document.addEventListener(event,renewIdle,{passive:true});
 async function request(path, options={}) {
-  const {responseType='json',...fetchOptions}=options;
-  const controller=new AbortController(); const timeout=setTimeout(()=>controller.abort(),30000);
+  const {responseType='json',timeoutMs=30000,...fetchOptions}=options;
+  const controller=new AbortController(); const timeout=setTimeout(()=>controller.abort(),timeoutMs);
   const activeToken=token;
   try {
     const response=await fetch(api+path,{...fetchOptions,credentials:'omit',cache:'no-store',headers:{'Content-Type':'application/json',...(activeToken?{Authorization:'Bearer '+activeToken}:{}),...fetchOptions.headers},signal:controller.signal});
@@ -27,7 +27,7 @@ async function request(path, options={}) {
       if(activeToken && token!==activeToken) throw new Error('Session changed. Please sign in again.');
       return await response.blob();
     }
-    let data; try { data=await response.json(); } catch (_) { throw new Error('The server returned an unreadable response. Please try again.'); }
+    let data; try { data=await response.json(); } catch (failure) { if(failure.name==='AbortError'||failure instanceof TypeError)throw failure;const error=new Error('The server returned an unreadable response (HTTP '+response.status+'). Please try again.');error.status=response.status;throw error; }
     if(!response.ok) {
       if([401,403].includes(response.status) && activeToken && token===activeToken) signOut('Your session ended or access changed. Please sign in again.');
       const error=new Error(Object.entries(data).map(([key,value])=>(key==='detail'?'':key.replaceAll('_',' ')+': ')+(Array.isArray(value)?value.join(' '):value)).join('\n'));
@@ -36,7 +36,7 @@ async function request(path, options={}) {
     if(activeToken && token!==activeToken) throw new Error('Session changed. Please sign in again.');
     return data;
   } catch(error) {
-    if(error.name==='AbortError'||error instanceof TypeError) throw new Error(path==='login/'?'Could not connect to staff sign-in. Wait a moment and try again.':'Connection interrupted. Refresh the applicant before repeating a save; the server may have already recorded it.');
+    if(error.name==='AbortError'||error instanceof TypeError) { const reading=!fetchOptions.method||fetchOptions.method==='GET';const connectionError=new Error(path==='login/'?'Could not connect to staff sign-in. Wait a moment and try again.':reading?'Could not load staff data. Check your connection and reload this section.':'Connection interrupted. Refresh the applicant before repeating a save; the server may have already recorded it.');connectionError.isConnectionError=true;throw connectionError; }
     throw error;
   } finally { clearTimeout(timeout); }
 }
@@ -89,7 +89,7 @@ async function loadList() {
 }
 $('#search-form').addEventListener('submit',event=>{event.preventDefault();page=1;loadList();});
 $('#status-filter').addEventListener('change',()=>{page=1;loadList();});
-$('#refresh-list').addEventListener('click',()=>loadList());
+$('#refresh-list').addEventListener('click',()=>{if(!$('#training-view').hidden)loadCohorts();else if(!$('#reports-view').hidden)loadReports();else loadList();});
 $('#previous-page').addEventListener('click',()=>{if(page>1){page--;loadList();}});
 $('#next-page').addEventListener('click',()=>{page++;loadList();});
 function kenyaInput(value) { if(!value)return '';return new Date(new Date(value).getTime()+3*60*60*1000).toISOString().slice(0,16); }
@@ -217,15 +217,35 @@ function resetTraining() {
 $('#training-tab').addEventListener('click',()=>{selectWorkspace('training');cohortPage=1;loadCohorts();});
 $('#cohort-previous').addEventListener('click',()=>{if(cohortPage>1){cohortPage--;loadCohorts();}});
 $('#cohort-next').addEventListener('click',()=>{cohortPage++;loadCohorts();});
+const reloadCohortsButton=$('#reload-cohorts');
+reloadCohortsButton?.addEventListener('click',()=>loadCohorts());
 async function loadCohorts() {
-  const sequence=++cohortSequence;message('#training-message','Loading cohorts…');
+  const sequence=++cohortSequence;message('#training-message','Loading training classes…');
+  const previousPage=cohortPage,previousDisabled=$('#cohort-previous').disabled,nextDisabled=$('#cohort-next').disabled;
+  if(reloadCohortsButton)reloadCohortsButton.disabled=true;$('#cohort-previous').disabled=true;$('#cohort-next').disabled=true;
+  $('#cohort-list').setAttribute('aria-busy','true');let loaded=false;
   try {
-    const data=await request('training/cohorts/?page='+cohortPage);if(sequence!==cohortSequence||!token)return;
-    manageTraining=data.can_manage;certifyTraining=data.can_certify;activateTraining=!!data.can_activate;loadSchedulingDates();$('#cohort-create').hidden=!manageTraining;
-    $('#cohort-previous').disabled=!data.previous;$('#cohort-next').disabled=!data.next;$('#cohort-page').textContent='Page '+cohortPage;
-    const list=$('#cohort-list');list.replaceChildren();if(!data.results.length)list.textContent='No training cohorts yet.';
-    data.results.forEach(c=>{const row=document.createElement('button');row.type='button';row.className='app-row';const name=document.createElement('strong');name.textContent=c.name;const meta=document.createElement('small');meta.textContent=(c.time_label?c.time_label+' · ':'')+c.enrolled+'/12 places'+(c.enrolled>=12?' · Full':'')+' · '+c.certified+' certified';row.append(name,meta);row.addEventListener('click',()=>openCohort(c.id));list.append(row);});message('#training-message','');
-  } catch(error){if(sequence===cohortSequence&&token)message('#training-message',error.message,true);}
+    let data;
+    for(let attempt=0;attempt<2;attempt++) {
+      try {data=await request('training/cohorts/?page='+previousPage,{timeoutMs:12000});break;}
+      catch(error){
+        if(sequence!==cohortSequence||!token)return;
+        if(attempt===0&&(error.isConnectionError||[500,502,503,504].includes(error.status))){message('#training-message','Connection interrupted. Retrying training classes…');continue;}
+        throw error;
+      }
+    }
+    if(sequence!==cohortSequence||!token)return;
+    if(!Array.isArray(data.results))throw new Error('The server returned an unexpected training list.');
+    manageTraining=data.can_manage;certifyTraining=data.can_certify;activateTraining=!!data.can_activate;
+    $('#cohort-create').hidden=!manageTraining;
+    $('#cohort-previous').disabled=!data.previous;$('#cohort-next').disabled=!data.next;$('#cohort-page').textContent='Page '+previousPage;
+    const list=$('#cohort-list');list.replaceChildren();if(!data.results.length)list.textContent='No training classes have been opened yet.';
+    data.results.forEach(c=>{const row=document.createElement('button');row.type='button';row.className='app-row';const name=document.createElement('strong');name.textContent=c.name;const meta=document.createElement('small');meta.textContent=(c.time_label?c.time_label+' · ':'')+c.enrolled+'/12 places'+(c.enrolled>=12?' · Full':'')+' · '+c.certified+' certified';row.append(name,meta);row.addEventListener('click',()=>openCohort(c.id));list.append(row);});
+    loaded=true;message('#training-message',data.count+' training classes found. Choose a class below.');loadSchedulingDates();
+  } catch(error){if(sequence===cohortSequence&&token)message('#training-message','Training classes could not be loaded'+(error.status?' (HTTP '+error.status+')':'')+'. '+error.message+' Use Reload training classes to try again.',true);}
+  finally{
+    if(sequence===cohortSequence){$('#cohort-list').setAttribute('aria-busy','false');if(reloadCohortsButton)reloadCohortsButton.disabled=false;if(!loaded){$('#cohort-previous').disabled=previousDisabled;$('#cohort-next').disabled=nextDisabled;}}
+  }
 }
 $('#cohort-create').addEventListener('submit',async event=>{
   event.preventDefault();const button=event.currentTarget.querySelector('button');button.disabled=true;
