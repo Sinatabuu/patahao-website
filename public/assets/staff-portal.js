@@ -266,14 +266,14 @@ function resultSelect(value,options,dataKey,dataValue) {
   const select=document.createElement('select');select.dataset[dataKey]=dataValue;options.forEach(([v,label])=>select.add(new Option(label,v)));select.value=value;return select;
 }
 function displayTrainee(e) {
-  clearActivation();activeTrainee=e;if(activateTraining)loadActivation(e.id);$('#trainee-panel').hidden=false;$('#trainee-name').textContent=e.full_name;$('#trainee-reference').textContent=e.application_reference;$('#trainee-state').textContent=e.state_label;
+  clearActivation();activeTrainee=e;if(activateTraining&&certifyTraining)loadActivation(e.id);$('#trainee-panel').hidden=false;$('#trainee-name').textContent=e.full_name;$('#trainee-reference').textContent=e.application_reference;$('#trainee-state').textContent=e.state_label;
   $('#identity-checked').checked=e.identity_checked;$('#agreement-signed').checked=e.agreement_signed;
   const attendance=$('#training-attendance');attendance.replaceChildren();e.attendance.forEach(a=>{const label=document.createElement('label');label.append(document.createTextNode(a.date+' (Kenya)'));label.append(resultSelect(a.result,[['pending','Not recorded'],['present','Present'],['absent','Absent'],['makeup','Make-up completed']],'session',a.session_id));attendance.append(label);});
   const assessments=$('#training-assessments');assessments.replaceChildren();e.assessments.forEach(a=>{const label=document.createElement('label');label.append(document.createTextNode(a.label));label.append(resultSelect(a.result,[['pending','Not assessed'],['pass','Competent'],['retrain','Further training required']],'module',a.module));assessments.append(label);});
-  const editable=manageTraining&&e.state==='enrolled';$('#training-record-form').querySelectorAll('input,select,button').forEach(control=>control.disabled=!editable);
-  const issues=$('#training-readiness');issues.replaceChildren();(e.readiness_issues.length?e.readiness_issues:['Recorded requirements are complete. Supervisor approval is still required.']).forEach(text=>{const li=document.createElement('li');li.textContent=text;issues.append(li);});
+  const editable=(manageTraining||certifyTraining)&&!e.activation&&e.state!=='withdrawn';$('#training-record-form').querySelectorAll('input,select,button').forEach(control=>control.disabled=!editable);$('#save-training').disabled=!manageTraining||e.state!=='enrolled';
+  const issues=$('#training-readiness');issues.replaceChildren();(e.readiness_issues.length?e.readiness_issues:['Ready for your approval. Attendance and detailed assessments are optional.']).forEach(text=>{const li=document.createElement('li');li.textContent=text;issues.append(li);});
   $('#training-certificate').textContent=e.certified_at?'Certified by '+e.certified_by+' · '+kenyanDate(e.certified_at)+(e.activation?' · Partner activated.':' · Activation pending.'):'';
-  $('#certify-training').hidden=!certifyTraining||e.state!=='enrolled';$('#certify-training').disabled=e.readiness_issues.length>0;
+  $('#certify-training').hidden=true;$('#certify-training').disabled=e.readiness_issues.length>0;
   $('#reopen-training').hidden=!!e.activation||!certifyTraining||e.state==='enrolled';$('#withdraw-training').hidden=!!e.activation||!certifyTraining||e.state==='withdrawn';
   const history=$('#training-history');history.replaceChildren();e.history.forEach(x=>{const li=document.createElement('li');li.textContent=x.action+' · '+x.actor+' · '+kenyanDate(x.created_at);history.append(li);});
 }
@@ -286,7 +286,7 @@ $('#reload-training').addEventListener('click',()=>{if(activeTrainee)openTrainee
 $('#training-record-form').addEventListener('submit',async event=>{
   event.preventDefault();if(!activeTrainee)return;const enrollmentId=activeTrainee.id;const button=$('#save-training');button.disabled=true;
   const payload={expected_updated_at:activeTrainee.updated_at,identity_checked:$('#identity-checked').checked,agreement_signed:$('#agreement-signed').checked,attendance:[...$('#training-attendance').querySelectorAll('select')].map(s=>({session_id:Number(s.dataset.session),result:s.value})),assessments:[...$('#training-assessments').querySelectorAll('select')].map(s=>({module:s.dataset.module,result:s.value}))};
-  try{const e=await request('training/enrollments/'+enrollmentId+'/',{method:'PATCH',body:JSON.stringify(payload)});if(!token||activeTrainee?.id!==enrollmentId)return;displayTrainee(e);message('#training-save-message','Training record saved. Certification has not been granted by this save.');}
+  try{const e=await request('training/enrollments/'+enrollmentId+'/',{method:'PATCH',body:JSON.stringify(payload)});if(!token||activeTrainee?.id!==enrollmentId)return;displayTrainee(e);message('#training-save-message','Progress saved. You can approve and activate when satisfied with training.');}
   catch(error){if(token)message('#training-save-message',error.message,true);}finally{if(token)button.disabled=!manageTraining||activeTrainee?.state!=='enrolled';}
 });
 async function decideTraining(decision) {
@@ -344,7 +344,7 @@ $('#activation-form').addEventListener('submit',async event=>{
   event.preventDefault();if(!activeTrainee||!activationAccount||!activateTraining)return;
   const id=activeTrainee.id,button=$('#activate-partner');button.disabled=true;
   try {
-    const result=await request('training/enrollments/'+id+'/activation/',{method:'POST',body:JSON.stringify({user_id:activationAccount.id,expected_updated_at:activeTrainee.updated_at,account_confirmed:$('#activation-account-confirmed').checked,no_cash_confirmed:$('#activation-no-cash').checked})});
+    const result=await request('training/enrollments/'+id+'/activation/',{method:'POST',body:JSON.stringify({user_id:activationAccount.id,expected_updated_at:activeTrainee.updated_at,account_confirmed:$('#activation-account-confirmed').checked,no_cash_confirmed:$('#activation-no-cash').checked,approve_training:true,identity_checked:$('#identity-checked').checked,agreement_signed:$('#agreement-signed').checked,training_confirmed:$('#activation-training-confirmed').checked})});
     if(!token||activeTrainee?.id!==id)return;await openTrainee(id);await loadCohorts();if(activeCohort)await openCohort(activeCohort.id);message('#activation-message',result.detail);
   }catch(error){if(token&&activeTrainee?.id===id)message('#activation-message',error.message,true);}
   finally{if(token)button.disabled=false;}

@@ -43,12 +43,10 @@ const submit=id=>d.querySelector(id).dispatchEvent(new w.Event('submit',{bubbles
  d.querySelectorAll('#training-attendance select').forEach(s=>s.value='present');d.querySelectorAll('#training-assessments select').forEach(s=>s.value='pass');submit('#training-record-form');await settle();
  assert.equal(saved.assessments.length,8);assert.equal(saved.identity_checked,true);
  assert.equal(d.querySelector('#certify-training').disabled,false);
- d.querySelector('#certify-training').click();await settle();
- assert.equal(decision.decision,'certify');assert.equal(d.querySelector('#save-training').disabled,true);
- assert.match(d.querySelector('#training-certificate').textContent,/Activation pending/);
- assert.equal(d.querySelector('#reopen-training').hidden,false);
+ assert.equal(d.querySelector('#certify-training').hidden,true);
+ assert.match(d.querySelector('#training-save-message').textContent,/Progress saved/);
  d.querySelector('#sign-out').click();
  assert.equal(d.querySelector('#trainee-panel').hidden,true);assert.equal(d.querySelector('#trainee-name').textContent,'');assert.equal(d.querySelector('#training-assessments').children.length,0);
  assert.equal(w.localStorage.length,0);assert.equal(w.sessionStorage.length,0);
- console.log('PASS: training roster, safe names, attendance and eight assessments, readiness, supervisor certification, locked certified record and logout clearing.');w.close();
+ console.log('PASS: training roster, safe names, attendance and eight assessments, optional records, save progress and logout clearing.');w.close();
 })().catch(error=>{console.error(error);w.close();process.exitCode=1;});

@@ -3,7 +3,7 @@ const {JSDOM}=require('jsdom');
 async function scenario(mode){
  const dom=new JSDOM(fs.readFileSync(path.join(__dirname,'../public/staff/index.html'),'utf8'),{url:'https://patahao.app/staff/',runScripts:'outside-only'}),w=dom.window,d=w.document;
  w.matchMedia=()=>({matches:false});w.HTMLElement.prototype.scrollIntoView=()=>{};
- let record={id:1,cohort_id:1,full_name:'Test applicant',application_reference:'PH-APP-TEST',state:'certified',state_label:'Training certified — activation pending',identity_checked:true,agreement_signed:true,updated_at:'2026-10-19T12:00:00Z',attendance:[],assessments:[],readiness_issues:[],history:[],certified_at:'2026-10-19T11:00:00Z',certified_by:'Supervisor',activation:null};
+ let record={id:1,cohort_id:1,full_name:'Test applicant',application_reference:'PH-APP-TEST',state:'enrolled',state_label:'In training',identity_checked:false,agreement_signed:false,updated_at:'2026-10-19T12:00:00Z',attendance:[],assessments:[],readiness_issues:[],history:[],certified_at:'2026-10-19T11:00:00Z',certified_by:'Supervisor',activation:null};
  const cohort={id:1,name:'Test class',reference:'COHORT',trainer_name:'Trainer',location:'Nairobi',enrolled:1,certified:1,sessions:[]};
  let posted,activationReads=0;
  w.fetch=async(url,options)=>{
@@ -31,8 +31,10 @@ async function scenario(mode){
  else if(mode==='missing'){assert.equal(d.querySelector('#activation-panel').hidden,false);assert.equal(d.querySelector('#activation-form').hidden,true);assert.match(d.querySelector('#activation-issues').textContent,/register in the app/);}
  else{
   assert.equal(d.querySelector('#activation-form').hidden,false);assert.match(d.querySelector('#activation-account').textContent,/applicant.*0712345678/);
+  assert.equal(d.querySelector('#certify-training').hidden,true);
+  d.querySelector('#identity-checked').checked=true;d.querySelector('#agreement-signed').checked=true;d.querySelector('#activation-training-confirmed').checked=true;
   d.querySelector('#activation-account-confirmed').checked=true;d.querySelector('#activation-no-cash').checked=true;submit('#activation-form');await settle();
-  assert.deepEqual(posted,{user_id:7,expected_updated_at:'2026-10-19T12:00:00Z',account_confirmed:true,no_cash_confirmed:true});
+  assert.deepEqual(posted,{user_id:7,expected_updated_at:'2026-10-19T12:00:00Z',account_confirmed:true,no_cash_confirmed:true,approve_training:true,identity_checked:true,agreement_signed:true,training_confirmed:true});
   assert.equal(d.querySelector('#activation-form').hidden,true);assert.match(d.querySelector('#activation-account').textContent,/Partner activated: PHA-TEST/);
   assert.equal(d.querySelector('#reopen-training').hidden,true);assert.equal(d.querySelector('#withdraw-training').hidden,true);
  }
