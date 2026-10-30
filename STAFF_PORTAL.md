@@ -30,3 +30,9 @@ CSV downloads require screening-edit permission, exclude phone/email, and includ
 the applied filters. Appointment rows open the existing applicant detail screen.
 Deploy the matching reports API before this frontend; no database migration is
 needed for this reporting increment.
+
+## Operations priorities
+
+The Today’s priorities tab uses `/api/staff/onboarding/operations/` with the existing in-memory JWT. It appears only when `staff.can_view_operations` is true. Managers check source records on entry or with Check current records; readers see the persisted queue. Category-level source permissions are enforced by the backend, including counts and guessed IDs. Source text is rendered with textContent. Actions have a double-submit guard and revision checks; failures direct staff to reload rather than retry a potentially successful mutation. Signing out clears queue/detail content. JavaScript's version hash must be updated with script changes.
+
+Unattended monitoring requires the backend cron command; this static website does not schedule background work. No AI provider or outbound messaging is used in this first increment. See `OPERATIONS_AGENT.md` in Sinatabuu/PatahaoApp for deployment and rule thresholds.

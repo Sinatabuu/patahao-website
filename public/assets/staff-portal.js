@@ -12,7 +12,7 @@ function signOut(reason='Signed out.') {
   $('#applicant-facts').replaceChildren(); $('#applicant-name').textContent=''; $('#applicant-reference').textContent='';
   $('#detail-content').hidden=true; $('#empty-detail').hidden=false; $('#screening-form').reset();
   $('#staff-name').textContent=''; $('#application-search').value=''; $('#status-filter').value='';
-  resetReports(); resetTraining();
+  resetReports(); resetTraining(); resetOperations();
   $('#staff-login').reset(); message('#login-message',reason); $('#staff-login').elements.username.focus();
 }
 function renewIdle() { if(token) { clearTimeout(idleTimer); idleTimer=setTimeout(()=>signOut('Signed out after 15 minutes of inactivity. Please sign in again.'),15*60*1000); } }
@@ -51,6 +51,7 @@ $('#staff-login').addEventListener('submit',async event=>{
     $('#staff-name').textContent=staff.name; page=1;
     clearTimeout(expiryTimer); expiryTimer=setTimeout(()=>signOut('Your session expired. Please sign in again.'),result.expires_in*1000); renewIdle();
     await loadList();
+    if(staff?.can_view_operations){$('#operations-tab').hidden=false;selectWorkspace('operations');loadOperations(true);}
   } catch(error) { message('#login-message',error.message,true); }
   finally { button.disabled=false; }
 });
@@ -89,7 +90,7 @@ async function loadList() {
 }
 $('#search-form').addEventListener('submit',event=>{event.preventDefault();page=1;loadList();});
 $('#status-filter').addEventListener('change',()=>{page=1;loadList();});
-$('#refresh-list').addEventListener('click',()=>{if(!$('#training-view').hidden)loadCohorts();else if(!$('#reports-view').hidden)loadReports();else loadList();});
+$('#refresh-list').addEventListener('click',()=>{if(!$('#operations-view').hidden)loadOperations();else if(!$('#training-view').hidden)loadCohorts();else if(!$('#reports-view').hidden)loadReports();else loadList();});
 $('#previous-page').addEventListener('click',()=>{if(page>1){page--;loadList();}});
 $('#next-page').addEventListener('click',()=>{page++;loadList();});
 function kenyaInput(value) { if(!value)return '';return new Date(new Date(value).getTime()+3*60*60*1000).toISOString().slice(0,16); }
@@ -139,6 +140,8 @@ $('#screening-form').addEventListener('submit',async event=>{
 
 let reportPage=1, reportSequence=0, reportFilters=new URLSearchParams(), exportsAllowed=false;
 function selectWorkspace(section) {
+  $('#operations-view').hidden=section!=='operations';
+  $('#operations-tab').setAttribute('aria-pressed',String(section==='operations'));
   $('#applications-view').hidden=section!=='applications'; $('#reports-view').hidden=section!=='reports'; $('#training-view').hidden=section!=='training';
   $('#applications-tab').setAttribute('aria-pressed',String(section==='applications'));
   $('#reports-tab').setAttribute('aria-pressed',String(section==='reports')); $('#training-tab').setAttribute('aria-pressed',String(section==='training'));
@@ -349,3 +352,76 @@ $('#activation-form').addEventListener('submit',async event=>{
   }catch(error){if(token&&activeTrainee?.id===id)message('#activation-message',error.message,true);}
   finally{if(token)button.disabled=false;}
 });
+
+// Operations queue uses the existing in-memory staff session; never store tokens.
+let operationsSequence=0, operationsDetailSequence=0, operationsPage=1, operationsSelected=null, operationsCanManage=false, operationsBusy=false;
+const operationStates={open:'Needs decision',following:'Following up',snoozed:'Deferred',resolved:'Resolved'};
+function resetOperations(){
+  operationsSequence++;operationsDetailSequence++;operationsSelected=null;operationsPage=1;operationsCanManage=false;
+  $('#operations-tab').hidden=true;$('#operations-view').hidden=true;$('#operations-list').replaceChildren();$('#operations-detail').replaceChildren();
+  for(const id of ['#operations-message','#operations-freshness','#operations-counts','#operations-page'])$(id).textContent='';
+  $('#operations-filter').value='active';
+}
+function operationText(tag,text){const el=document.createElement(tag);el.textContent=text;return el;}
+async function loadOperations(scan=false){
+  if(!token||!staff?.can_view_operations)return;
+  const sequence=++operationsSequence;message('#operations-message',scan?'Checking current records…':'Loading priorities…');
+  try{
+    if(scan){
+      const info=await request('operations/?page=1');
+      if(sequence!==operationsSequence||!token)return;
+      if(info.can_manage)await request('operations/scan/',{method:'POST',body:'{}'});
+    }
+    const data=await request('operations/?'+new URLSearchParams({page:String(operationsPage),state:$('#operations-filter').value}));
+    if(sequence!==operationsSequence||!token)return;
+    operationsCanManage=data.can_manage;$('#operations-scan').hidden=!data.can_manage;
+    $('#operations-freshness').textContent=(data.last_scan_at?'Last checked: '+kenyanDate(data.last_scan_at):'No scan has run yet.')+(data.stale?' — Queue needs a fresh check.':'');
+    $('#operations-counts').textContent=Object.entries(operationStates).map(([key,label])=>label+': '+(data.counts[key]||0)).join(' · ');
+    const list=$('#operations-list');list.replaceChildren();
+    if(!data.results.length)list.append(operationText('p',data.stale?'No recorded issues in this view. Check current records before relying on this queue.':'No issues in this view.'));
+    data.results.forEach(issue=>{const button=operationText('button','');button.type='button';button.className='app-row';
+      button.append(operationText('strong',issue.title),operationText('span',issue.reference+' · '+operationStates[issue.state]),operationText('small',(issue.owner?'Owner: '+issue.owner:'Unassigned')+(issue.follow_up_at?' · Follow up: '+kenyanDate(issue.follow_up_at):'')));
+      button.addEventListener('click',()=>openOperation(issue.id));list.append(button);
+    });
+    $('#operations-previous').disabled=!data.previous;$('#operations-next').disabled=!data.next;$('#operations-page').textContent='Page '+operationsPage;
+    message('#operations-message','');
+  }catch(error){if(sequence===operationsSequence&&token)message('#operations-message',error.message,true);}
+}
+async function openOperation(id){
+  const sequence=++operationsDetailSequence;operationsSelected=null;$('#operations-detail').replaceChildren(operationText('p','Loading follow-up…'));
+  try{
+    const issue=await request('operations/'+id+'/');if(sequence!==operationsDetailSequence||!token)return;operationsSelected=issue;
+    const panel=$('#operations-detail');panel.replaceChildren(operationText('h3',issue.title),operationText('p',issue.reference),operationText('p',issue.reason),operationText('h4','Next action'),operationText('p',issue.next_action));
+    panel.append(operationText('h4','Current source record'));
+    Object.entries(issue.source).forEach(([key,value])=>{if(value!==null&&value!=='')panel.append(operationText('p',key.replaceAll('_',' ')+': '+value));});
+    const source=issue.source;
+    if(['application','training'].includes(source.type)){
+      const link=operationText('button',source.type==='application'?'Open applicant':'Open training record');link.type='button';link.className='quiet-button';
+      link.addEventListener('click',async()=>{if(source.type==='application'){selectWorkspace('applications');await openDetail(source.id);}else{selectWorkspace('training');await loadCohorts();if(!token)return;await openCohort(source.cohort_id);if(token)await openTrainee(source.id);}});panel.append(link);
+    }else panel.append(operationText('p','Use this record ID in the staff app to investigate or process the next action.'));
+    if(operationsCanManage&&issue.state!=='resolved'){
+      for(const [action,label] of [['claim','I will follow up'],['release','Return to unassigned'],['reopen','Needs decision']]){
+        const button=operationText('button',label);button.type='button';button.className='quiet-button';button.addEventListener('click',()=>saveOperation(action));panel.append(button);
+      }
+      const form=document.createElement('form');const label=operationText('label','Follow up at (Kenya time, within seven days)');const input=document.createElement('input');input.type='datetime-local';input.required=true;label.append(input);
+      const button=operationText('button','Defer until this time');button.type='submit';button.className='quiet-button';form.append(label,button);
+      form.addEventListener('submit',event=>{event.preventDefault();saveOperation('defer',input.value+':00+03:00');});panel.append(form);
+    }
+    panel.append(operationText('p','Issues close automatically when a scan finds that the triggering condition has cleared. Following up does not mark a payment paid or activate a partner.'),operationText('h4','History'));
+    const history=document.createElement('ol');history.className='history';issue.history.forEach(e=>history.append(operationText('li',e.action.replaceAll('_',' ')+' · '+e.actor+' · '+kenyanDate(e.created_at))));panel.append(history);
+  }catch(error){if(sequence===operationsDetailSequence&&token){$('#operations-detail').replaceChildren(operationText('p',error.message));}}
+}
+async function saveOperation(action,followUp){
+  if(!operationsSelected||operationsBusy||!operationsCanManage)return;
+  const issue=operationsSelected;operationsBusy=true;$('#operations-detail').querySelectorAll('button,input').forEach(e=>e.disabled=true);
+  try{
+    await request('operations/'+issue.id+'/',{method:'PATCH',body:JSON.stringify({action,revision:issue.revision,...(followUp?{follow_up_at:followUp}:{})})});
+    if(!token)return;await loadOperations();if(operationsSelected?.id===issue.id)await openOperation(issue.id);
+  }catch(error){if(token)message('#operations-message',error.message+' Reload the follow-up before trying again.',true);}
+  finally{operationsBusy=false;$('#operations-detail').querySelectorAll('button,input').forEach(e=>e.disabled=false);}
+}
+$('#operations-tab').addEventListener('click',()=>{selectWorkspace('operations');operationsPage=1;loadOperations(true);});
+$('#operations-scan').addEventListener('click',async()=>{const button=$('#operations-scan');button.disabled=true;try{await loadOperations(true);if(operationsSelected)await openOperation(operationsSelected.id);}finally{button.disabled=false;}});
+$('#operations-filter').addEventListener('change',()=>{operationsPage=1;loadOperations();});
+$('#operations-previous').addEventListener('click',()=>{if(operationsPage>1){operationsPage--;loadOperations();}});
+$('#operations-next').addEventListener('click',()=>{operationsPage++;loadOperations();});
